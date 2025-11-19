@@ -173,7 +173,7 @@ export default [
       'capitalized-comments': 'off',
       'comma-spacing': 'warn',
       'dot-notation': 'warn',
-      'indent': ['warn', 2, {SwitchCase: 1}],
+      'indent': ['warn', 4, {SwitchCase: 1}],
       'key-spacing': 'warn',
       'keyword-spacing': ['warn', {overrides: {catch: {before: true, after: true}}}],
       'max-len': ['warn', {

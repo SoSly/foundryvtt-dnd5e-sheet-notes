@@ -9,83 +9,99 @@ import { NoteContextMenu } from './note_context_menu';
 import { runMigrations } from '../migrations/migrations.js';
 
 const SHEET_MODES = {
-  PLAY: 1,
-  EDIT: 2
+    PLAY: 1,
+    EDIT: 2
 };
 
 /**
  * Initialize the notes tab feature
  */
 export function initializeNotesTab() {
-  loadTemplates([
-    'modules/dnd5e-sheet-notes/templates/partials/note_item.hbs'
-  ]);
+    const loadTemplatesFn = foundry.applications?.handlebars?.loadTemplates ?? loadTemplates;
+    loadTemplatesFn([
+        'modules/dnd5e-sheet-notes/templates/partials/note_item.hbs'
+    ]);
 
-  Hooks.on('renderActorSheet5eCharacter2', addNotes);
-  Hooks.on('renderActorSheet5eNPC2', addNotes);
+    Hooks.on('renderActorSheet5eCharacter2', addNotes);
+    Hooks.on('renderActorSheet5eNPC2', addNotes);
+    Hooks.on('renderCharacterActorSheet', addNotes);
+    Hooks.on('renderNPCActorSheet', addNotes);
 }
 
 /**
  * Main entry point - Add notes functionality to a character sheet
  * @param {ActorSheet5e} app - The sheet application
- * @param {HTMLElement|jQuery} html - The rendered HTML (can be jQuery object or DOM element)
- * @param {Object} data - The sheet data
+ * @param {HTMLElement|jQuery} html - The rendered HTML (can be jQuery object or DOM element in v12, HTMLElement in v13)
+ * @param {Object} data - The sheet data (v12) or context (v13)
  */
 async function addNotes(app, html, _data) {
-  const el = html[0] || html;
+    const el = html instanceof HTMLElement ? html : (html[0] || html);
 
-  const root = el.closest('.app') || el.querySelector('.app') || el;
+    const root = el.closest?.('.app') || el.querySelector?.('.app') || el;
 
-  if (!app.isEditable) {
-    return;
-  }
-
-
-  // Initialize filter state for notes
-  if (!app._filters) {
-    app._filters = {};
-  }
-  if (!app._filters.notes) {
-    app._filters.notes = { name: '', properties: new Set() };
-  }
-
-  app._notesContentMatches = new Set();
-
-  if (!app._originalFilterChildren && app._filterChildren) {
-    app._originalFilterChildren = app._filterChildren;
-  }
-
-  app._filterChildren = function(collection, properties) {
-    if (collection !== 'notes') {
-      return app._originalFilterChildren ? app._originalFilterChildren.call(this, collection, properties) : null;
+    if (!app.isEditable) {
+        return;
     }
 
-    const allNotes = this.actor.items.filter(item => item.type === 'dnd5e-sheet-notes.note');
-    const searchTerm = this._filters.notes.name.toLowerCase();
 
-    this._notesContentMatches.clear();
+    // Initialize filter state for notes
+    if (!app._filters) {
+        app._filters = {};
+    }
+    if (!app._filters.notes) {
+        app._filters.notes = { name: '', properties: new Set() };
+    }
 
-    if (searchTerm) {
-      allNotes.forEach(note => {
-        if (note.system.description?.value) {
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = note.system.description.value;
-          const contentText = (tempDiv.textContent || tempDiv.innerText || '').toLowerCase();
-          if (contentText.includes(searchTerm)) {
-            this._notesContentMatches.add(note.id);
-          }
+    app._notesContentMatches = new Set();
+
+    if (!app._originalFilterChildren && app._filterChildren) {
+        app._originalFilterChildren = app._filterChildren;
+    }
+
+    app._filterChildren = function(collection, properties) {
+        if (collection !== 'notes') {
+            return app._originalFilterChildren ? app._originalFilterChildren.call(this, collection, properties) : null;
         }
-      });
+
+        const allNotes = this.actor.items.filter(item => item.type === 'dnd5e-sheet-notes.note');
+        const searchTerm = this._filters.notes.name.toLowerCase();
+
+        this._notesContentMatches.clear();
+
+        if (searchTerm) {
+            allNotes.forEach(note => {
+                if (note.system.description?.value) {
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = note.system.description.value;
+                    const contentText = (tempDiv.textContent || tempDiv.innerText || '').toLowerCase();
+                    if (contentText.includes(searchTerm)) {
+                        this._notesContentMatches.add(note.id);
+                    }
+                }
+            });
+        }
+
+        return allNotes;
+    };
+
+    await addNotesContent(app, root);
+
+    addNotesTab(root);
+
+    addNotesButtons(app, root);
+
+    const tabNav = root.querySelector('.tabs[data-group="primary"]');
+    if (tabNav) {
+        tabNav.addEventListener('click', event => {
+            if (event.target.closest('[data-tab]')) {
+                setTimeout(() => addNotesButtons(app, root), 10);
+            }
+        });
     }
 
-    return allNotes;
-  };
-
-  await addNotesContent(app, root);
-
-  addNotesTab(root);
-
-  addNotesButtons(app, root);
+    // TODO: In Foundry v13/dnd5e 5.x, ApplicationV2 doesn't auto-refresh when items change.
+    // Need to find a better way to trigger re-render without breaking the sheet.
+    // For now, users will need to manually refresh (close/reopen sheet or switch tabs).
 }
 
 /**
@@ -94,27 +110,28 @@ async function addNotes(app, html, _data) {
  * @param {HTMLElement} el - The sheet element
  */
 async function addNotesContent(app, el) {
-  const tabBody = el.querySelector('.tab-body');
-  if (!tabBody) {
-    return;
-  }
+    const tabBody = el.querySelector('.tab-body');
+    if (!tabBody) {
+        return;
+    }
 
-  let notesContent = tabBody.querySelector('.tab.dnd5e-sheet-notes[data-tab="notes"]');
+    const existingContent = tabBody.querySelector('.tab.dnd5e-sheet-notes[data-tab="notes"]');
+    const wasActive = existingContent?.classList.contains('active') ?? false;
 
-  if (!notesContent) {
-    const active = app._tabs?.[0]?.active === 'notes';
+    if (existingContent) {
+        existingContent.remove();
+    }
 
+    const active = wasActive || app._tabs?.[0]?.active === 'notes';
     await runMigrations(app.actor);
-
     const templateData = await getNotesTabData(app.actor, active, app._mode);
-
-    const notesHtml = await renderTemplate('modules/dnd5e-sheet-notes/templates/notes_tab.hbs', templateData);
+    const renderTemplateFn = foundry.applications?.handlebars?.renderTemplate ?? renderTemplate;
+    const notesHtml = await renderTemplateFn('modules/dnd5e-sheet-notes/templates/notes_tab.hbs', templateData);
 
     tabBody.insertAdjacentHTML('beforeend', notesHtml);
 
-    notesContent = tabBody.querySelector('.tab.dnd5e-sheet-notes[data-tab="notes"]');
+    const notesContent = tabBody.querySelector('.tab.dnd5e-sheet-notes[data-tab="notes"]');
     activateNotesListeners(app.actor, app, notesContent);
-  }
 }
 
 /**
@@ -122,24 +139,25 @@ async function addNotesContent(app, el) {
  * @param {HTMLElement} el - The sheet element
  */
 function addNotesTab(el) {
-  const tabsNav = el.querySelector('.tabs[data-group="primary"]');
-  if (!tabsNav) {
-    return;
-  }
+    const tabsNav = el.querySelector('.tabs[data-group="primary"]');
+    if (!tabsNav) {
+        return;
+    }
 
-  if (tabsNav.querySelector('[data-tab="notes"]')) {
-    return;
-  }
+    if (tabsNav.querySelector('[data-tab="notes"]')) {
+        return;
+    }
 
-  const notesTab = document.createElement('a');
-  notesTab.className = 'item control';
-  notesTab.dataset.group = 'primary';
-  notesTab.dataset.tab = 'notes';
-  notesTab.dataset.tooltip = 'dnd5e-sheet-notes.tab.label';
-  notesTab.setAttribute('aria-label', game.i18n.localize('dnd5e-sheet-notes.tab.label'));
-  notesTab.innerHTML = '<i class="fas fa-book-open"></i>';
+    const notesTab = document.createElement('a');
+    notesTab.className = 'item control';
+    notesTab.dataset.action = 'tab';
+    notesTab.dataset.group = 'primary';
+    notesTab.dataset.tab = 'notes';
+    notesTab.dataset.tooltip = 'dnd5e-sheet-notes.tab.label';
+    notesTab.setAttribute('aria-label', game.i18n.localize('dnd5e-sheet-notes.tab.label'));
+    notesTab.innerHTML = '<i class="fas fa-book-open"></i>';
 
-  tabsNav.appendChild(notesTab);
+    tabsNav.appendChild(notesTab);
 }
 
 /**
@@ -150,43 +168,43 @@ function addNotesTab(el) {
  * @returns {Object} Template data
  */
 async function getNotesTabData(actor, active, mode) {
-  await Category.ensureDefault(actor);
-  let categories = actor.getFlag('dnd5e-sheet-notes', 'categories') || [];
+    await Category.ensureDefault(actor);
+    let categories = actor.getFlag('dnd5e-sheet-notes', 'categories') || [];
 
-  categories.sort((a, b) => a.name.localeCompare(b.name));
+    categories.sort((a, b) => a.name.localeCompare(b.name));
 
-  const allNotes = actor.items.filter(item => item.type === 'dnd5e-sheet-notes.note');
+    const allNotes = actor.items.filter(item => item.type === 'dnd5e-sheet-notes.note');
 
-  const categoryData = categories.map(category => {
-    const categoryNotes = allNotes.filter(note => {
-      const noteCategory = note.system.category;
-      if (!noteCategory || noteCategory === '') {
-        return category.name === 'Notes';
-      }
-      return noteCategory === category.key;
-    });
+    const categoryData = categories.map(category => {
+        const categoryNotes = allNotes.filter(note => {
+            const noteCategory = note.system.category;
+            if (!noteCategory || noteCategory === '') {
+                return category.name === 'Notes';
+            }
+            return noteCategory === category.key;
+        });
 
-    const notes = categoryNotes.sort((a, b) => {
-      if (category.ordering === 0) { // ALPHABETICAL
-        return a.name.localeCompare(b.name);
-      }
-      return (a.sort || 0) - (b.sort || 0);
+        const notes = categoryNotes.sort((a, b) => {
+            if (category.ordering === 0) { // ALPHABETICAL
+                return a.name.localeCompare(b.name);
+            }
+            return (a.sort || 0) - (b.sort || 0);
+        });
+
+        return {
+            ...category,
+            isDefault: category.name === 'Notes',
+            notes,
+            noteCount: notes.length,
+            active: active || false,
+        };
     });
 
     return {
-      ...category,
-      isDefault: category.name === 'Notes',
-      notes,
-      noteCount: notes.length,
-      active: active || false,
+        categories: categoryData,
+        active: active || false,
+        editable: mode === SHEET_MODES.EDIT
     };
-  });
-
-  return {
-    categories: categoryData,
-    active: active || false,
-    editable: mode === SHEET_MODES.EDIT
-  };
 }
 
 /**
@@ -196,147 +214,148 @@ async function getNotesTabData(actor, active, mode) {
  * @param {HTMLElement} container - The container element
  */
 function activateNotesListeners(actor, app, container) {
-  NoteContextMenu.initialize(container, app);
+    NoteContextMenu.initialize(container, app);
 
-  container.querySelector('.add-category')?.addEventListener('click', async event => {
-    event.preventDefault();
-    CategoryEditor.show(actor);
-  });
-
-  container.querySelectorAll('.items-section.collapsible .items-header').forEach(header => {
-    header.addEventListener('click', async event => {
-      if (event.target.closest('.item-controls')) return;
-
-      event.preventDefault();
-      const categoryElement = event.currentTarget.closest('.items-section');
-      const categoryId = categoryElement.dataset.categoryId;
-
-      try {
-        const category = Category.fromActor(actor, categoryId);
-        if (category) {
-          await category.toggleCollapsed();
-        }
-      } catch (error) {
-        ui.notifications.error(error.message);
-      }
+    container.querySelector('.add-category')?.addEventListener('click', async event => {
+        event.preventDefault();
+        CategoryEditor.show(actor);
     });
-  });
 
-  container.querySelectorAll('.item-control[data-action="edit-category"]').forEach(link => {
-    link.addEventListener('click', async event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const categoryId = event.currentTarget.dataset.categoryId;
-      const category = Category.fromActor(actor, categoryId);
-      if (category) {
-        CategoryEditor.show(actor, category);
-      }
-    });
-  });
+    container.querySelectorAll('.items-section.collapsible .items-header').forEach(header => {
+        header.addEventListener('click', async event => {
+            console.log('Category header clicked');
+            if (event.target.closest('.item-controls')) return;
 
-  container.querySelectorAll('.item-control[data-action="delete-category"]').forEach(link => {
-    link.addEventListener('click', async event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const categoryId = event.currentTarget.dataset.categoryId;
-      const category = Category.fromActor(actor, categoryId);
-      if (!category) return;
+            event.preventDefault();
+            const categoryElement = event.currentTarget.closest('.items-section');
+            const categoryId = categoryElement.dataset.categoryId;
 
-      try {
-        const confirm = await foundry.applications.api.DialogV2.confirm({
-          window: {
-            title: game.i18n.localize('dnd5e-sheet-notes.category.delete'),
-            icon: 'fas fa-trash'
-          },
-          position: {
-            width: 400
-          },
-          content: game.i18n.format('dnd5e-sheet-notes.category.confirm-delete', { name: category.name }),
-          yes: {
-            label: 'Yes',
-            icon: 'fas fa-check'
-          },
-          no: {
-            label: 'No',
-            icon: 'fas fa-times'
-          }
+            try {
+                const category = Category.fromActor(actor, categoryId);
+                if (category) {
+                    await category.toggleCollapsed();
+                }
+            } catch (error) {
+                ui.notifications.error(error.message);
+            }
         });
-
-        if (confirm) {
-          await category.delete();
-        }
-      } catch (error) {
-        if (error.message !== 'Dialog was dismissed without pressing a button.') {
-          ui.notifications.error(error.message);
-        }
-      }
     });
-  });
 
-  container.querySelectorAll('.item-name[data-action="open-note"]').forEach(link => {
-    link.addEventListener('click', async event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const noteId = event.currentTarget.closest('[data-note-key]').dataset.noteKey;
-      const note = actor.items.get(noteId);
-      if (note) {
-        note.sheet.render(true);
-      }
-    });
-  });
-
-  container.querySelectorAll('.item-control[data-action="edit-note"]').forEach(link => {
-    link.addEventListener('click', async event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const noteId = event.currentTarget.dataset.noteKey;
-      const note = actor.items.get(noteId);
-      if (note) {
-        note.sheet.render(true);
-      }
-    });
-  });
-
-  container.querySelectorAll('.item-control[data-action="delete-note"]').forEach(link => {
-    link.addEventListener('click', async event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const noteId = event.currentTarget.dataset.noteKey;
-      const note = actor.items.get(noteId);
-      if (!note) return;
-
-      try {
-        const confirm = await foundry.applications.api.DialogV2.confirm({
-          window: {
-            title: game.i18n.localize('dnd5e-sheet-notes.actions.delete'),
-            icon: 'fas fa-trash'
-          },
-          position: {
-            width: 400
-          },
-          content: `Are you sure you want to delete the note "${note.name}"?`,
-          yes: {
-            label: 'Yes',
-            icon: 'fas fa-check'
-          },
-          no: {
-            label: 'No',
-            icon: 'fas fa-times'
-          }
+    container.querySelectorAll('.item-control[data-action="edit-category"]').forEach(link => {
+        link.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const categoryId = event.currentTarget.dataset.categoryId;
+            const category = Category.fromActor(actor, categoryId);
+            if (category) {
+                CategoryEditor.show(actor, category);
+            }
         });
-
-        if (confirm) {
-          await note.delete();
-        }
-      } catch (error) {
-        if (error.message !== 'Dialog was dismissed without pressing a button.') {
-          ui.notifications.error(error.message);
-        }
-      }
     });
-  });
 
-  setupNoteDragDrop(app, container);
+    container.querySelectorAll('.item-control[data-action="delete-category"]').forEach(link => {
+        link.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const categoryId = event.currentTarget.dataset.categoryId;
+            const category = Category.fromActor(actor, categoryId);
+            if (!category) return;
+
+            try {
+                const confirm = await foundry.applications.api.DialogV2.confirm({
+                    window: {
+                        title: game.i18n.localize('dnd5e-sheet-notes.category.delete'),
+                        icon: 'fas fa-trash'
+                    },
+                    position: {
+                        width: 400
+                    },
+                    content: game.i18n.format('dnd5e-sheet-notes.category.confirm-delete', { name: category.name }),
+                    yes: {
+                        label: 'Yes',
+                        icon: 'fas fa-check'
+                    },
+                    no: {
+                        label: 'No',
+                        icon: 'fas fa-times'
+                    }
+                });
+
+                if (confirm) {
+                    await category.delete();
+                }
+            } catch (error) {
+                if (error.message !== 'Dialog was dismissed without pressing a button.') {
+                    ui.notifications.error(error.message);
+                }
+            }
+        });
+    });
+
+    container.querySelectorAll('.item-name[data-action="open-note"]').forEach(link => {
+        link.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const noteId = event.currentTarget.closest('[data-note-key]').dataset.noteKey;
+            const note = actor.items.get(noteId);
+            if (note) {
+                note.sheet.render(true);
+            }
+        });
+    });
+
+    container.querySelectorAll('.item-control[data-action="edit-note"]').forEach(link => {
+        link.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const noteId = event.currentTarget.dataset.noteKey;
+            const note = actor.items.get(noteId);
+            if (note) {
+                note.sheet.render(true);
+            }
+        });
+    });
+
+    container.querySelectorAll('.item-control[data-action="delete-note"]').forEach(link => {
+        link.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const noteId = event.currentTarget.dataset.noteKey;
+            const note = actor.items.get(noteId);
+            if (!note) return;
+
+            try {
+                const confirm = await foundry.applications.api.DialogV2.confirm({
+                    window: {
+                        title: game.i18n.localize('dnd5e-sheet-notes.actions.delete'),
+                        icon: 'fas fa-trash'
+                    },
+                    position: {
+                        width: 400
+                    },
+                    content: `Are you sure you want to delete the note "${note.name}"?`,
+                    yes: {
+                        label: 'Yes',
+                        icon: 'fas fa-check'
+                    },
+                    no: {
+                        label: 'No',
+                        icon: 'fas fa-times'
+                    }
+                });
+
+                if (confirm) {
+                    await note.delete();
+                }
+            } catch (error) {
+                if (error.message !== 'Dialog was dismissed without pressing a button.') {
+                    ui.notifications.error(error.message);
+                }
+            }
+        });
+    });
+
+    setupNoteDragDrop(app, container);
 }
 
 /**
@@ -345,67 +364,67 @@ function activateNotesListeners(actor, app, container) {
  * @param {HTMLElement} html - The rendered HTML
  */
 function addNotesButtons(app, html) {
-  const form = html.querySelector('form');
-  if (!form) {
-    console.warn('Sheet Notes: Could not find form element');
-    return;
-  }
-
-  if (form.querySelector('.create-child.dnd5e-sheet-notes')) {
-    return;
-  }
-
-  const warningsDialog = form.querySelector('dialog.warnings');
-  const insertBefore = warningsDialog || null;
-
-  const addNoteBtn = document.createElement('button');
-  addNoteBtn.type = 'button';
-  addNoteBtn.className = 'gold-button create-child dnd5e-sheet-notes add-note';
-  addNoteBtn.innerHTML = '<i class="fas fa-plus"></i>';
-  addNoteBtn.title = 'Add Note';
-  addNoteBtn.addEventListener('click', async event => {
-    event.preventDefault();
-
-    try {
-      const noteData = {
-        name: 'New Note',
-        type: 'dnd5e-sheet-notes.note',
-        img: 'icons/svg/book.svg',
-        system: {
-          description: {
-            value: ''
-          },
-          category: ''
-        }
-      };
-
-      const [note] = await app.actor.createEmbeddedDocuments('Item', [noteData]);
-
-      if (note) {
-        note.sheet.render(true);
-      }
-    } catch (error) {
-      ui.notifications.error(`Failed to create note: ${error.message}`);
+    const form = html.tagName === 'FORM' ? html : html.querySelector('form');
+    if (!form) {
+        console.warn('Sheet Notes: Could not find form element');
+        return;
     }
-  });
 
-  const addCategoryBtn = document.createElement('button');
-  addCategoryBtn.type = 'button';
-  addCategoryBtn.className = 'gold-button create-child dnd5e-sheet-notes add-category';
-  addCategoryBtn.innerHTML = '<i class="fas fa-folder-plus"></i>';
-  addCategoryBtn.title = 'Add Category';
-  addCategoryBtn.addEventListener('click', async event => {
-    event.preventDefault();
-    CategoryEditor.show(app.actor);
-  });
+    const windowContent = form.querySelector('.window-content');
+    const target = windowContent || form;
 
-  if (insertBefore) {
-    form.insertBefore(addNoteBtn, insertBefore);
-    form.insertBefore(addCategoryBtn, insertBefore);
-  } else {
-    form.appendChild(addNoteBtn);
-    form.appendChild(addCategoryBtn);
-  }
+    const existingButtons = target.querySelectorAll('.create-child.dnd5e-sheet-notes');
+    existingButtons.forEach(btn => btn.remove());
+
+    const notesTab = form.querySelector('.tab[data-tab="notes"]');
+    const isNotesTabActive = notesTab?.classList.contains('active');
+    if (!isNotesTabActive) {
+        return;
+    }
+
+    const addNoteBtn = document.createElement('button');
+    addNoteBtn.type = 'button';
+    addNoteBtn.className = 'gold-button create-child dnd5e-sheet-notes add-note';
+    addNoteBtn.innerHTML = '<i class="fas fa-plus"></i>';
+    addNoteBtn.title = 'Add Note';
+    addNoteBtn.addEventListener('click', async event => {
+        event.preventDefault();
+
+        try {
+            const noteData = {
+                name: 'New Note',
+                type: 'dnd5e-sheet-notes.note',
+                img: 'icons/svg/book.svg',
+                system: {
+                    description: {
+                        value: ''
+                    },
+                    category: ''
+                }
+            };
+
+            const [note] = await app.actor.createEmbeddedDocuments('Item', [noteData]);
+
+            if (note) {
+                note.sheet.render(true);
+            }
+        } catch (error) {
+            ui.notifications.error(`Failed to create note: ${error.message}`);
+        }
+    });
+
+    const addCategoryBtn = document.createElement('button');
+    addCategoryBtn.type = 'button';
+    addCategoryBtn.className = 'gold-button create-child dnd5e-sheet-notes add-category';
+    addCategoryBtn.innerHTML = '<i class="fas fa-folder-plus"></i>';
+    addCategoryBtn.title = 'Add Category';
+    addCategoryBtn.addEventListener('click', async event => {
+        event.preventDefault();
+        CategoryEditor.show(app.actor);
+    });
+
+    target.appendChild(addNoteBtn);
+    target.appendChild(addCategoryBtn);
 }
 
 
@@ -415,20 +434,21 @@ function addNotesButtons(app, html) {
  * @param {HTMLElement} container - The notes tab container
  */
 function setupNoteDragDrop(app, container) {
-  const dragDrop = new DragDrop({
-    dragSelector: '.item[data-item-id]',
-    dropSelector: '.items-section',
-    permissions: {
-      dragstart: app._canDragStart.bind(app),
-      drop: app._canDragDrop.bind(app)
-    },
-    callbacks: {
-      dragstart: handleNoteDragStart.bind(null, app),
-      drop: handleNoteDrop.bind(null, app)
-    }
-  });
+    const DragDropClass = foundry.applications?.ux?.DragDrop?.implementation ?? DragDrop;
+    const dragDrop = new DragDropClass({
+        dragSelector: '.item[data-item-id]',
+        dropSelector: '.items-section',
+        permissions: {
+            dragstart: app._canDragStart.bind(app),
+            drop: app._canDragDrop.bind(app)
+        },
+        callbacks: {
+            dragstart: handleNoteDragStart.bind(null, app),
+            drop: handleNoteDrop.bind(null, app)
+        }
+    });
 
-  dragDrop.bind(container);
+    dragDrop.bind(container);
 }
 
 /**
@@ -437,34 +457,40 @@ function setupNoteDragDrop(app, container) {
  * @param {DragEvent} event - The drag start event
  */
 function handleNoteDragStart(app, event) {
-  const li = event.currentTarget;
-  const itemId = li.dataset.itemId;
+    const li = event.currentTarget;
+    const itemId = li.dataset.itemId;
 
-  if (!itemId) return;
+    if (!itemId) return;
 
-  const item = app.actor.items.get(itemId);
-  if (!item || item.type !== 'dnd5e-sheet-notes.note') return;
+    const item = app.actor.items.get(itemId);
+    if (!item || item.type !== 'dnd5e-sheet-notes.note') return;
 
-  const dragData = item.toDragData();
+    const dragData = item.toDragData();
 
-  event.dataTransfer.setData('text/plain', JSON.stringify(dragData));
+    event.dataTransfer.setData('text/plain', JSON.stringify(dragData));
 
-  setTimeout(() => {
-    const notesTab = li.closest('.tab.dnd5e-sheet-notes');
-    if (notesTab) {
-      notesTab.classList.add('dragging-active');
-    }
-  }, 0);
+    setTimeout(() => {
+        const notesTab = li.closest('.tab.dnd5e-sheet-notes');
+        if (notesTab) {
+            notesTab.classList.add('dragging-active');
+            notesTab.querySelectorAll('.items-section:not(:has(.item))').forEach(section => {
+                section.removeAttribute('hidden');
+            });
+        }
+    }, 0);
 
-  const cleanup = () => {
-    const notesTab = li.closest('.tab.dnd5e-sheet-notes');
-    if (notesTab) {
-      notesTab.classList.remove('dragging-active');
-    }
-    li.removeEventListener('dragend', cleanup);
-  };
+    const cleanup = () => {
+        const notesTab = li.closest('.tab.dnd5e-sheet-notes');
+        if (notesTab) {
+            notesTab.classList.remove('dragging-active');
+            notesTab.querySelectorAll('.items-section:not(:has(.item))').forEach(section => {
+                section.setAttribute('hidden', '');
+            });
+        }
+        li.removeEventListener('dragend', cleanup);
+    };
 
-  li.addEventListener('dragend', cleanup);
+    li.addEventListener('dragend', cleanup);
 }
 
 /**
@@ -473,33 +499,34 @@ function handleNoteDragStart(app, event) {
  * @param {DragEvent} event - The drop event
  */
 async function handleNoteDrop(app, event) {
-  event.preventDefault();
+    event.preventDefault();
 
-  const data = TextEditor.getDragEventData(event);
+    const TextEditorClass = foundry.applications?.ux?.TextEditor?.implementation ?? TextEditor;
+    const data = TextEditorClass.getDragEventData(event);
 
-  if (!data || data.type !== 'Item') return;
+    if (!data || data.type !== 'Item') return;
 
-  const item = await fromUuid(data.uuid);
-  if (!item || item.type !== 'dnd5e-sheet-notes.note') return;
+    const item = await fromUuid(data.uuid);
+    if (!item || item.type !== 'dnd5e-sheet-notes.note') return;
 
-  if (item.parent?.id !== app.actor.id) return;
+    if (item.parent?.id !== app.actor.id) return;
 
-  await Category.ensureDefault(app.actor);
+    await Category.ensureDefault(app.actor);
 
-  const dropTarget = event.target.closest('.items-section');
-  if (!dropTarget) return;
+    const dropTarget = event.target.closest('.items-section');
+    if (!dropTarget) return;
 
-  const targetCategoryId = dropTarget.dataset.categoryId;
+    const targetCategoryId = dropTarget.dataset.categoryId;
 
-  const categories = app.actor.getFlag('dnd5e-sheet-notes', 'categories') || [];
-  const targetCategoryObj = categories.find(c => c.key === targetCategoryId);
-  const targetCategory = (targetCategoryObj && targetCategoryObj.name === 'Notes') ? '' : targetCategoryId;
-  const currentCategory = item.system.category || '';
+    const categories = app.actor.getFlag('dnd5e-sheet-notes', 'categories') || [];
+    const targetCategoryObj = categories.find(c => c.key === targetCategoryId);
+    const targetCategory = (targetCategoryObj && targetCategoryObj.name === 'Notes') ? '' : targetCategoryId;
+    const currentCategory = item.system.category || '';
 
-  if (currentCategory === targetCategory) return;
+    if (currentCategory === targetCategory) return;
 
-  await item.update({
-    'system.category': targetCategory
-  });
+    await item.update({
+        'system.category': targetCategory
+    });
 }
 

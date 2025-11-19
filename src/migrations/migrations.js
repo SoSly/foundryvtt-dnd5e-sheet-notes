@@ -14,7 +14,7 @@ export const MIGRATION_VERSION = 1;
  * Available migrations
  */
 const MIGRATIONS = {
-  1: migrateToV1
+    1: migrateToV1
 };
 
 /**
@@ -23,29 +23,29 @@ const MIGRATIONS = {
  * @returns {Promise<void>}
  */
 export async function runMigrations(actor) {
-  if (!actor) throw new Error('Actor must be provided');
+    if (!actor) throw new Error('Actor must be provided');
 
-  const currentVersion = actor.getFlag(MODULE_ID, 'version');
+    const currentVersion = actor.getFlag(MODULE_ID, 'version');
 
-  if (currentVersion !== undefined && currentVersion >= MIGRATION_VERSION) {
-    return;
-  }
-
-  const hasAnyNotes = actor.items.some(item => item.type === 'dnd5e-sheet-notes.note');
-  const hasCategories = (actor.getFlag(MODULE_ID, 'categories') || []).length > 0;
-
-  if (currentVersion === undefined && !hasAnyNotes && !hasCategories) {
-    await actor.setFlag(MODULE_ID, 'version', MIGRATION_VERSION);
-    return;
-  }
-
-  const startVersion = currentVersion || 0;
-
-  for (let version = startVersion + 1; version <= MIGRATION_VERSION; version++) {
-    if (MIGRATIONS[version]) {
-      await MIGRATIONS[version](actor);
+    if (currentVersion !== undefined && currentVersion >= MIGRATION_VERSION) {
+        return;
     }
-  }
 
-  await actor.setFlag(MODULE_ID, 'version', MIGRATION_VERSION);
+    const hasAnyNotes = actor.items.some(item => item.type === 'dnd5e-sheet-notes.note');
+    const hasCategories = (actor.getFlag(MODULE_ID, 'categories') || []).length > 0;
+
+    if (currentVersion === undefined && !hasAnyNotes && !hasCategories) {
+        await actor.setFlag(MODULE_ID, 'version', MIGRATION_VERSION);
+        return;
+    }
+
+    const startVersion = currentVersion || 0;
+
+    for (let version = startVersion + 1; version <= MIGRATION_VERSION; version++) {
+        if (MIGRATIONS[version]) {
+            await MIGRATIONS[version](actor);
+        }
+    }
+
+    await actor.setFlag(MODULE_ID, 'version', MIGRATION_VERSION);
 }

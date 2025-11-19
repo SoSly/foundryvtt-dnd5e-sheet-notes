@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Updated to support Foundry VTT v13 and D&D 5e system v5.x while maintaining backward compatibility with v12/v4.x
+
 ## [1.1.2](https://github.com/nivthefox/foundryvtt-dnd5e-sheet-notes/releases/tag/1.1.2) - 2025-07-28
 
 ### Fixed

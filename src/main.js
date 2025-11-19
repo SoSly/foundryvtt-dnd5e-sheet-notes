@@ -5,23 +5,30 @@ import { registerSearchEnhancement } from './ui/search_enhancement';
 import { registerFavoriteEnhancement } from './ui/favorite_enhancement';
 
 Hooks.once('init', () => {
-  console.log('5e Sheet Notes & Trackers | Module initialized');
+    console.log('5e Sheet Notes & Trackers | Module initialized');
 
-  Object.assign(CONFIG.Item.dataModels, {
-    'dnd5e-sheet-notes.note': NoteModel
-  });
+    Object.assign(CONFIG.Item.dataModels, {
+        'dnd5e-sheet-notes.note': NoteModel
+    });
 
-  NoteModel.setup();
+    NoteModel.setup();
 
-  DocumentSheetConfig.registerSheet(Item, 'dnd5e-sheet-notes', NoteSheet, {
-    types: ['dnd5e-sheet-notes.note'],
-    makeDefault: true
-  });
+    const SheetConfig = foundry.applications?.apps?.DocumentSheetConfig ?? DocumentSheetConfig;
+    SheetConfig.registerSheet(Item, 'dnd5e-sheet-notes', NoteSheet, {
+        types: ['dnd5e-sheet-notes.note'],
+        makeDefault: true
+    });
 
-  initializeNotesTab();
+    initializeNotesTab();
 });
 
 Hooks.once('setup', () => {
-  registerSearchEnhancement();
-  registerFavoriteEnhancement();
+    registerSearchEnhancement();
+    registerFavoriteEnhancement();
+});
+
+Hooks.on('dnd5e.filterItem', (sheet, item, filters) => {
+    if (item.type === 'dnd5e-sheet-notes.note') {
+        return false;
+    }
 });
