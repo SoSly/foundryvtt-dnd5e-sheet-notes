@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0](https://github.com/nivthefox/foundryvtt-dnd5e-sheet-notes/releases/tag/1.2.0) - 2025-11-19
 
 ### Changed
 - Updated to support Foundry VTT v13 and D&D 5e system v5.x while maintaining backward compatibility with v12/v4.x

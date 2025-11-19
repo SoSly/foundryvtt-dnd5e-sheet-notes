@@ -1,6 +1,6 @@
 {
   "name": "dnd5e-sheet-notes",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "description": "Character notes and trackers for D&D 5th Edition in Foundry VTT",
   "type": "module",
   "keywords": [
